@@ -9,6 +9,8 @@ import (
 	"path"
 	"path/filepath"
 	"tram-commons/lib/model"
+	"tram-commons/lib/db"
+	"tram-commons/lib/util"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"github.com/streadway/amqp"
@@ -61,6 +63,8 @@ func guess_unpack_command(workdir, full_filename string) (* exec.Cmd) {
 	ext := filepath.Ext(full_filename)
 	var cmd *exec.Cmd;
 	switch ext {
+	case ".tar":
+		cmd = exec.Command("tar", "-xf", full_filename)
 	case ".gz", ".gzip":
 		cmd = exec.Command("tar", "-xzf", full_filename)
 	case ".7z", ".7zip":
@@ -149,15 +153,18 @@ func convert_to_unix(full_filename string) {
 
 // TODO: share mogno and amqp init section to get rid of init order importance
 func createApp() (* TramExecApp) {
-	mongoSocket := os.ExpandEnv("tram-mongo:27017")
+	mongoSocket := "tram-mongo:27017"
 	log.Println("Connect to mongo at:", mongoSocket)
-	s, err := mgo.Dial(mongoSocket)
+	s, err := db.MongoInitConnect(mongoSocket)
 	if err != nil {
         panic(err)
     }
-    amqpSocket := os.ExpandEnv("amqp://$RABBIT_USER:$RABBIT_PASSWORD@tram-rabbit:5672")
+
+    rabbitUser := util.GetenvDefault("RABBIT_USER", "guest")
+    rabbitPassword := util.GetenvDefault("RABBIT_PASSWORD", "guest") 
+    amqpSocket := fmt.Sprintf("amqp://%v:%v@tram-rabbit:5672", rabbitUser, rabbitPassword)
     log.Println("Connect to rabbit at:", amqpSocket)
-    q, err2 := amqp.Dial(amqpSocket)
+    q, err2 := db.RabbitInitConnect(amqpSocket)
     if err2 != nil {
     	log.Fatal(err2)
     }
