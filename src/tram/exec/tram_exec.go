@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"time"
 	"path/filepath"
 	"tram-commons/lib/model"
 	"tram-commons/lib/db"
@@ -26,6 +27,8 @@ type TramExecApp struct {
 	s *mgo.Session
 	q *amqp.Connection
 }
+
+type DirSpec map[string] time.Time
 
 func prepare_exec_dir() {
 	os.RemoveAll(EXEC_PATH)
@@ -123,23 +126,12 @@ func Copy(oldpath, newpath string) error {
 	return nil
 }
 
-func inject_control_and_execute(workdir, srcdir, filename string) ([]byte, error) {
-	workdir = dive_into_data(workdir)
-	err_copy := Copy(path.Join(srcdir, filename), path.Join(workdir, filename))
-	if err_copy != nil {
-		log.Fatal(err_copy)
-	}
-
-	d, _ := os.Open(workdir)
-	names, _ := d.Readdirnames(0)
-	log.Println(names)
+func runControlScript(workdir, filename string) ([]byte, error) {
 	cmd := exec.Command("/bin/bash", path.Join(workdir, filename))
 	cmd.Dir = workdir
 
 	out, err := cmd.CombinedOutput()
-	// if err != nil {
-		// log.Fatal(err)
-	// }
+	
 	return out, err
 }
 
@@ -182,13 +174,32 @@ func (app *TramExecApp) Stop() {
 	app.q.Close();
 }
 
+func placeControlScript(workdir, srcdir, filename string) {
+	workdir = dive_into_data(workdir)
+	err_copy := Copy(path.Join(srcdir, filename), path.Join(workdir, filename))
+	if err_copy != nil {
+		log.Fatal(err_copy)
+	}
+}
+
+func makeDirSpec(dir string) DirSpec {
+
+}
+
+func findChanges(dsa, dsb DirSpec) DirSpec {
+
+}
+
 func (app *TramExecApp) execute(data_fid, control_fid string) ([]byte, error) {
 	prepare_exec_dir()
 	data_fd := app.retrieve_file(data_fid, "data", SRC_DIR, false)
 	control_fd := app.retrieve_file(control_fid, "control", SRC_DIR, true)
 	convert_to_unix(path.Join(SRC_DIR, control_fd.Filename))
 	unpack_data(RUN_DIR, SRC_DIR, data_fd.Filename)
-	s, e := inject_control_and_execute(RUN_DIR, SRC_DIR, control_fd.Filename) 
+	placeControlScript(RUN_DIR, SRC_DIR, control_fd.Filename)
+	dirSpecBefore := makeDirSpec(RUN_DIR)
+	s, e := runControlScript(RUN_DIR, SRC_DIR, control_fd.Filename) 
+	dirSpecAfter := makeDirSpec(RUN_DIR)
 	return s, e
 }
 
