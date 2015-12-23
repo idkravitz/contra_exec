@@ -28,7 +28,12 @@ type TramExecApp struct {
 	q *amqp.Connection
 }
 
-type DirSpec map[string] time.Time
+type DirSpecUnit struct {
+	ModTime time.Time
+	IsDir bool
+}
+
+type DirSpec map[string] DirSpecUnit
 
 func prepare_exec_dir() {
 	os.RemoveAll(EXEC_PATH)
@@ -170,8 +175,8 @@ func createApp() (* TramExecApp) {
 }
 
 func (app *TramExecApp) Stop() {
-	app.s.Close();
-	app.q.Close();
+	app.s.Close()
+	app.q.Close()
 }
 
 func placeControlScript(workdir, srcdir, filename string) {
@@ -182,8 +187,35 @@ func placeControlScript(workdir, srcdir, filename string) {
 	}
 }
 
-func makeDirSpec(dir string) DirSpec {
 
+func fillDirSpec(name string, dirSpec DirSpec) error {
+
+	f, err := os.Open(name)
+	if err != nil {
+		return err
+	}
+	fi, err2 := f.Stat()
+	if err2 != nil {
+		return err2
+	}
+
+	dirSpec[name] = DirSpecUnit {
+		ModTime: fi.ModTime(),
+		IsDir: fi.IsDir(),
+	}
+	if fi.IsDir() {
+		names, err3 := f.Readdirnames(0)
+		if err3 != nil {
+			return err3;
+		}
+		for _, name := range names {
+			fillDirSpec(name, dirSpec)
+		} 
+	}
+	// dirInfo, err = f.Readdir(0)
+	// if err != nil {
+		// log.Fatal(err)
+	// }	
 }
 
 func findChanges(dsa, dsb DirSpec) DirSpec {
@@ -197,9 +229,13 @@ func (app *TramExecApp) execute(data_fid, control_fid string) ([]byte, error) {
 	convert_to_unix(path.Join(SRC_DIR, control_fd.Filename))
 	unpack_data(RUN_DIR, SRC_DIR, data_fd.Filename)
 	placeControlScript(RUN_DIR, SRC_DIR, control_fd.Filename)
-	dirSpecBefore := makeDirSpec(RUN_DIR)
+
+	dirSpecBefore := makeDirSpec(RUN_DIR, DirSpec{})
 	s, e := runControlScript(RUN_DIR, SRC_DIR, control_fd.Filename) 
-	dirSpecAfter := makeDirSpec(RUN_DIR)
+	dirSpecAfter := makeDirSpec(RUN_DIR, DirSpec{})
+	
+	diff := findChanges(dirSpecBefore, dirSpecAfter)
+	
 	return s, e
 }
 
