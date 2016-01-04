@@ -1,48 +1,50 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
-	"fmt"
-	"log"
 	"path"
-	"time"
 	"path/filepath"
-	"tram-commons/lib/model"
+	"time"
 	"tram-commons/lib/db"
+	"tram-commons/lib/model"
 	"tram-commons/lib/util"
+
+	"github.com/streadway/amqp"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"github.com/streadway/amqp"
-	)
+)
 
-const EXEC_PATH = "/home/tram/exec_dir"
-var SRC_DIR string = path.Join(EXEC_PATH, "src")
-var RUN_DIR string = path.Join(EXEC_PATH, "run")
+const execPath = "/home/tram/exec_dir"
 
-type TramExecApp struct {
-	client_id string
-	console_launch bool
-	s *mgo.Session
-	q *amqp.Connection
+var srcDir = path.Join(execPath, "src")
+var runDir = path.Join(execPath, "run")
+
+type tramExecApp struct {
+	clientID      string
+	consoleLaunch bool
+	s             *mgo.Session
+	q             *amqp.Connection
 }
 
-type DirSpecUnit struct {
+type dirSpecUnit struct {
 	ModTime time.Time
-	IsDir bool
+	IsDir   bool
 }
 
-type DirSpec map[string] DirSpecUnit
+type dirSpec map[string]dirSpecUnit
 
-func prepare_exec_dir() {
-	os.RemoveAll(EXEC_PATH)
-	os.Mkdir(EXEC_PATH, 0700)
-	os.Mkdir(SRC_DIR, 0700)
-	os.Mkdir(RUN_DIR, 0700)
+func prepareExecDir() {
+	os.RemoveAll(execPath)
+	os.Mkdir(execPath, 0700)
+	os.Mkdir(srcDir, 0700)
+	os.Mkdir(runDir, 0700)
 }
 
-func (app *TramExecApp) retrieve_file(id string, collection string, dir string, executable bool) *model.FileDescription{
+func (app *tramExecApp) retrieveFile(id string, collection string, dir string, executable bool) *model.FileDescription {
 	s := app.s.Copy()
 	defer s.Close()
 
@@ -67,24 +69,24 @@ func (app *TramExecApp) retrieve_file(id string, collection string, dir string, 
 	return fd
 }
 
-func guess_unpack_command(workdir, full_filename string) (* exec.Cmd) {
-	ext := filepath.Ext(full_filename)
-	var cmd *exec.Cmd;
+func guessUnpackCommand(workdir, fullFilename string) *exec.Cmd {
+	ext := filepath.Ext(fullFilename)
+	var cmd *exec.Cmd
 	switch ext {
 	case ".tar":
-		cmd = exec.Command("tar", "-xf", full_filename)
+		cmd = exec.Command("tar", "-xf", fullFilename)
 	case ".gz", ".gzip":
-		cmd = exec.Command("tar", "-xzf", full_filename)
+		cmd = exec.Command("tar", "-xzf", fullFilename)
 	case ".7z", ".7zip":
-		cmd = exec.Command("7za", "x", full_filename)
+		cmd = exec.Command("7za", "x", fullFilename)
 	}
 	cmd.Dir = workdir
 	return cmd
 }
 
-func unpack_data(workdir, srcdir, filename string) {
-	full_filename :=  path.Join(srcdir, filename)
-	cmd := guess_unpack_command(workdir, full_filename)
+func unpackData(workdir, srcDir, filename string) {
+	fullFilename := path.Join(srcDir, filename)
+	cmd := guessUnpackCommand(workdir, fullFilename)
 
 	out, err := cmd.CombinedOutput()
 	log.Println(string(out))
@@ -93,7 +95,7 @@ func unpack_data(workdir, srcdir, filename string) {
 	}
 }
 
-func dive_into_data(workdir string) string {
+func diveIntoData(workdir string) string {
 	wd, err1 := os.Open(workdir)
 	if err1 != nil {
 		log.Fatal(err1)
@@ -104,13 +106,13 @@ func dive_into_data(workdir string) string {
 	}
 	finalPath := workdir
 	if len(fis) == 1 && fis[0].IsDir() {
-		finalPath = dive_into_data(path.Join(finalPath, fis[0].Name()))
+		finalPath = diveIntoData(path.Join(finalPath, fis[0].Name()))
 	}
 	return finalPath
-	
+
 }
 
-func Copy(oldpath, newpath string) error {
+func simpleCopy(oldpath, newpath string) error {
 	fd1, err1 := os.Open(oldpath)
 	if err1 != nil {
 		return err1
@@ -120,14 +122,14 @@ func Copy(oldpath, newpath string) error {
 	if err2 != nil {
 		return err2
 	}
-	fd1_stat, err3 := fd1.Stat()
+	fd1Stat, err3 := fd1.Stat()
 	if err3 != nil {
 		return err3
 	}
 	defer fd2.Close()
 	io.Copy(fd2, fd1)
 
-	fd2.Chmod(fd1_stat.Mode())
+	fd2.Chmod(fd1Stat.Mode())
 	return nil
 }
 
@@ -136,12 +138,12 @@ func runControlScript(workdir, filename string) ([]byte, error) {
 	cmd.Dir = workdir
 
 	out, err := cmd.CombinedOutput()
-	
+
 	return out, err
 }
 
-func convert_to_unix(full_filename string) {
-	cmd := exec.Command("dos2unix", full_filename)
+func convertToUnixLE(fullFilename string) {
+	cmd := exec.Command("dos2unix", fullFilename)
 	err := cmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -149,46 +151,45 @@ func convert_to_unix(full_filename string) {
 }
 
 // TODO: share mogno and amqp init section to get rid of init order importance
-func createApp() (* TramExecApp) {
+func createApp() *tramExecApp {
 	mongoSocket := "tram-mongo:27017"
 	log.Println("Connect to mongo at:", mongoSocket)
 	s, err := db.MongoInitConnect(mongoSocket)
 	if err != nil {
-        panic(err)
-    }
+		panic(err)
+	}
 
-    rabbitUser := util.GetenvDefault("RABBIT_USER", "guest")
-    rabbitPassword := util.GetenvDefault("RABBIT_PASSWORD", "guest") 
-    amqpSocket := fmt.Sprintf("amqp://%v:%v@tram-rabbit:5672", rabbitUser, rabbitPassword)
-    log.Println("Connect to rabbit at:", amqpSocket)
-    q, err2 := db.RabbitInitConnect(amqpSocket)
-    if err2 != nil {
-    	log.Fatal(err2)
-    }
-	app := &TramExecApp{
-		s: s,
-		q: q,
-		client_id: os.Getenv("CLIENT_ID"),
-		console_launch: false,
+	rabbitUser := util.GetenvDefault("RABBIT_USER", "guest")
+	rabbitPassword := util.GetenvDefault("RABBIT_PASSWORD", "guest")
+	amqpSocket := fmt.Sprintf("amqp://%v:%v@tram-rabbit:5672", rabbitUser, rabbitPassword)
+	log.Println("Connect to rabbit at:", amqpSocket)
+	q, err2 := db.RabbitInitConnect(amqpSocket)
+	if err2 != nil {
+		log.Fatal(err2)
+	}
+	app := &tramExecApp{
+		s:             s,
+		q:             q,
+		clientID:      os.Getenv("clientID"),
+		consoleLaunch: false,
 	}
 	return app
 }
 
-func (app *TramExecApp) Stop() {
+func (app *tramExecApp) Stop() {
 	app.s.Close()
 	app.q.Close()
 }
 
-func placeControlScript(workdir, srcdir, filename string) {
-	workdir = dive_into_data(workdir)
-	err_copy := Copy(path.Join(srcdir, filename), path.Join(workdir, filename))
-	if err_copy != nil {
-		log.Fatal(err_copy)
+func placeControlScript(workdir, srcDir, filename string) {
+	workdir = diveIntoData(workdir)
+	err := simpleCopy(path.Join(srcDir, filename), path.Join(workdir, filename))
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
-
-func fillDirSpec(name string, dirSpec DirSpec) error {
+func fillDirSpec(name string, dirSpec dirSpec) error {
 
 	f, err := os.Open(name)
 	if err != nil {
@@ -199,47 +200,50 @@ func fillDirSpec(name string, dirSpec DirSpec) error {
 		return err2
 	}
 
-	dirSpec[name] = DirSpecUnit {
+	dirSpec[name] = dirSpecUnit{
 		ModTime: fi.ModTime(),
-		IsDir: fi.IsDir(),
+		IsDir:   fi.IsDir(),
 	}
 	if fi.IsDir() {
 		names, err3 := f.Readdirnames(0)
 		if err3 != nil {
-			return err3;
+			return err3
 		}
 		for _, name := range names {
 			fillDirSpec(name, dirSpec)
-		} 
+		}
 	}
 	// dirInfo, err = f.Readdir(0)
 	// if err != nil {
-		// log.Fatal(err)
-	// }	
+	// log.Fatal(err)
+	// }
+	return nil
 }
 
-func findChanges(dsa, dsb DirSpec) DirSpec {
-
+func findChanges(dsa, dsb dirSpec) dirSpec {
+	return nil
 }
 
-func (app *TramExecApp) execute(data_fid, control_fid string) ([]byte, error) {
-	prepare_exec_dir()
-	data_fd := app.retrieve_file(data_fid, "data", SRC_DIR, false)
-	control_fd := app.retrieve_file(control_fid, "control", SRC_DIR, true)
-	convert_to_unix(path.Join(SRC_DIR, control_fd.Filename))
-	unpack_data(RUN_DIR, SRC_DIR, data_fd.Filename)
-	placeControlScript(RUN_DIR, SRC_DIR, control_fd.Filename)
+func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, error) {
+	prepareExecDir()
+	dataFd := app.retrieveFile(dataFid, "data", srcDir, false)
+	controlFd := app.retrieveFile(controlFid, "control", srcDir, true)
+	convertToUnixLE(path.Join(srcDir, controlFd.Filename))
+	unpackData(runDir, srcDir, dataFd.Filename)
+	placeControlScript(runDir, srcDir, controlFd.Filename)
 
-	dirSpecBefore := makeDirSpec(RUN_DIR, DirSpec{})
-	s, e := runControlScript(RUN_DIR, SRC_DIR, control_fd.Filename) 
-	dirSpecAfter := makeDirSpec(RUN_DIR, DirSpec{})
-	
-	diff := findChanges(dirSpecBefore, dirSpecAfter)
-	
+	dirSpecBefore := dirSpec{}
+	fillDirSpec(runDir, dirSpecBefore)
+	s, e := runControlScript(runDir, controlFd.Filename)
+	dirSpecAfter := dirSpec{}
+	fillDirSpec(runDir, dirSpecAfter)
+
+	//diff := findChanges(dirSpecBefore, dirSpecAfter)
+
 	return s, e
 }
 
-func (app *TramExecApp) processDelivery(delivery amqp.Delivery) {
+func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
 	msg := model.TaskMsg{}
 	if err := bson.Unmarshal(delivery.Body, &msg); err != nil {
 		log.Fatal(err)
@@ -261,17 +265,17 @@ func (app *TramExecApp) processDelivery(delivery amqp.Delivery) {
 	}
 }
 
-func (app *TramExecApp) MainLoop() {
+func (app *tramExecApp) MainLoop() {
 	channel, err := app.q.Channel()
 	if err != nil { // Add durability with redial action
 		log.Fatal(err)
 	}
-	delivery_ch, err2 := channel.Consume("execution_queue", app.client_id, false, false, true, false, nil)
+	deliveryCh, err2 := channel.Consume("execution_queue", app.clientID, false, false, true, false, nil)
 	if err2 != nil {
 		log.Fatal(err)
 	}
 	for {
-		delivery := <-delivery_ch
+		delivery := <-deliveryCh
 		app.processDelivery(delivery)
 	}
 }
@@ -280,10 +284,10 @@ func main() {
 	app := createApp()
 	defer app.Stop()
 	if len(os.Args) > 1 {
-		app.console_launch = true
-		data_fid := os.Args[1]
-		control_fid := os.Args[2]
-		fmt.Println(app.execute(data_fid, control_fid))
+		app.consoleLaunch = true
+		dataFid := os.Args[1]
+		controlFid := os.Args[2]
+		fmt.Println(app.execute(dataFid, controlFid))
 	} else {
 		app.MainLoop()
 	}
