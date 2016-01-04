@@ -109,7 +109,6 @@ func diveIntoData(workdir string) string {
 		finalPath = diveIntoData(path.Join(finalPath, fis[0].Name()))
 	}
 	return finalPath
-
 }
 
 func simpleCopy(oldpath, newpath string) error {
