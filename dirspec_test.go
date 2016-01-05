@@ -7,6 +7,6 @@ func TestFindChanges(t *testing.T) {
 	t.Error(s)
 }
 
-func TestMain(m *testing.M) {
-	m.Run()
-}
+// func TestMain(m *testing.M) {
+// m.Run()
+// }

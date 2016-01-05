@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kravitz/tram-exec/tram-commons/lib/db"
-	"github.com/kravitz/tram-exec/tram-commons/lib/model"
-	"github.com/kravitz/tram-exec/tram-commons/lib/util"
+	"github.com/kravitz/tram_exec/tram-commons/db"
+	"github.com/kravitz/tram_exec/tram-commons/model"
+	"github.com/kravitz/tram_exec/tram-commons/util"
 
 	"github.com/streadway/amqp"
 	"gopkg.in/mgo.v2"
