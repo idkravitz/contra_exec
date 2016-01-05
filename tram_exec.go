@@ -9,9 +9,10 @@ import (
 	"path"
 	"path/filepath"
 	"time"
-	"tram-commons/lib/db"
-	"tram-commons/lib/model"
-	"tram-commons/lib/util"
+
+	"github.com/kravitz/tram-exec/tram-commons/lib/db"
+	"github.com/kravitz/tram-exec/tram-commons/lib/model"
+	"github.com/kravitz/tram-exec/tram-commons/lib/util"
 
 	"github.com/streadway/amqp"
 	"gopkg.in/mgo.v2"
