@@ -18,7 +18,7 @@ RUN useradd -r -m tram
 USER tram
 WORKDIR /home/tram
 
-RUN mkdir bin src pkg www src/tram src/tram-commons
+RUN mkdir bin src pkg www 
 ENV GOPATH /home/tram
 ENV PATH /usr/local/transims4/bin:$PATH
 RUN go get gopkg.in/mgo.v2 && go get github.com/streadway/amqp
@@ -27,10 +27,10 @@ USER root
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 USER tram
 
-ADD src/tram/exec src/tram/exec
-ADD src/tram-commons/lib src/tram-commons/lib
+ADD tram-exec src/tram-exec/
+ADD tram-commons src/tram-commons/
 
-RUN go install tram/exec
+RUN go install tram-exec
 EXPOSE 8080
 
-ENTRYPOINT ["./bin/exec"]
+ENTRYPOINT ["./bin/tram-exec"]
