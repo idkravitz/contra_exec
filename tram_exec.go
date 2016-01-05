@@ -81,7 +81,9 @@ func guessUnpackCommand(workdir, fullFilename string) *exec.Cmd {
 	case ".7z", ".7zip":
 		cmd = exec.Command("7za", "x", fullFilename)
 	}
-	cmd.Dir = workdir
+	if cmd != nil {
+		cmd.Dir = workdir
+	}
 	return cmd
 }
 
@@ -97,13 +99,13 @@ func unpackData(workdir, srcDir, filename string) {
 }
 
 func diveIntoData(workdir string) string {
-	wd, err1 := os.Open(workdir)
-	if err1 != nil {
-		log.Fatal(err1)
+	wd, err := os.Open(workdir)
+	if err != nil {
+		log.Fatal(err)
 	}
-	fis, err2 := wd.Readdir(0)
-	if err2 != nil {
-		log.Fatal(err2)
+	fis, err := wd.Readdir(0)
+	if err != nil {
+		log.Fatal(err)
 	}
 	finalPath := workdir
 	if len(fis) == 1 && fis[0].IsDir() {
@@ -113,18 +115,18 @@ func diveIntoData(workdir string) string {
 }
 
 func simpleCopy(oldpath, newpath string) error {
-	fd1, err1 := os.Open(oldpath)
-	if err1 != nil {
-		return err1
+	fd1, err := os.Open(oldpath)
+	if err != nil {
+		return err
 	}
 	defer fd1.Close()
-	fd2, err2 := os.Create(newpath)
-	if err2 != nil {
-		return err2
+	fd2, err := os.Create(newpath)
+	if err != nil {
+		return err
 	}
-	fd1Stat, err3 := fd1.Stat()
-	if err3 != nil {
-		return err3
+	fd1Stat, err := fd1.Stat()
+	if err != nil {
+		return err
 	}
 	defer fd2.Close()
 	io.Copy(fd2, fd1)
@@ -156,17 +158,18 @@ func createApp() *tramExecApp {
 	log.Println("Connect to mongo at:", mongoSocket)
 	s, err := db.MongoInitConnect(mongoSocket)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	rabbitUser := util.GetenvDefault("RABBIT_USER", "guest")
 	rabbitPassword := util.GetenvDefault("RABBIT_PASSWORD", "guest")
 	amqpSocket := fmt.Sprintf("amqp://%v:%v@tram-rabbit:5672", rabbitUser, rabbitPassword)
 	log.Println("Connect to rabbit at:", amqpSocket)
-	q, err2 := db.RabbitInitConnect(amqpSocket)
-	if err2 != nil {
-		log.Fatal(err2)
+	q, err := db.RabbitInitConnect(amqpSocket)
+	if err != nil {
+		log.Fatal(err)
 	}
+
 	app := &tramExecApp{
 		s:             s,
 		q:             q,
@@ -195,9 +198,9 @@ func fillDirSpec(name string, dirSpec dirSpec) error {
 	if err != nil {
 		return err
 	}
-	fi, err2 := f.Stat()
-	if err2 != nil {
-		return err2
+	fi, err := f.Stat()
+	if err != nil {
+		return err
 	}
 
 	dirSpec[name] = dirSpecUnit{
@@ -205,9 +208,9 @@ func fillDirSpec(name string, dirSpec dirSpec) error {
 		IsDir:   fi.IsDir(),
 	}
 	if fi.IsDir() {
-		names, err3 := f.Readdirnames(0)
-		if err3 != nil {
-			return err3
+		names, err := f.Readdirnames(0)
+		if err != nil {
+			return err
 		}
 		for _, name := range names {
 			fillDirSpec(name, dirSpec)
@@ -270,8 +273,8 @@ func (app *tramExecApp) MainLoop() {
 	if err != nil { // Add durability with redial action
 		log.Fatal(err)
 	}
-	deliveryCh, err2 := channel.Consume("execution_queue", app.clientID, false, false, true, false, nil)
-	if err2 != nil {
+	deliveryCh, err := channel.Consume("execution_queue", app.clientID, false, false, true, false, nil)
+	if err != nil {
 		log.Fatal(err)
 	}
 	for {
