@@ -192,7 +192,7 @@ func placeControlScript(workdir, srcDir, filename string) {
 	}
 }
 
-func fillDirSpec(name string, dirSpec dirSpec) error {
+func fillDirSpec(name string, ds dirSpec) error {
 
 	f, err := os.Open(name)
 	if err != nil {
@@ -203,17 +203,19 @@ func fillDirSpec(name string, dirSpec dirSpec) error {
 		return err
 	}
 
-	dirSpec[name] = dirSpecUnit{
+	ds[name] = dirSpecUnit{
 		ModTime: fi.ModTime(),
 		IsDir:   fi.IsDir(),
 	}
 	if fi.IsDir() {
+		dirname := name
 		names, err := f.Readdirnames(0)
+
 		if err != nil {
 			return err
 		}
 		for _, name := range names {
-			fillDirSpec(name, dirSpec)
+			fillDirSpec(path.Join(dirname, name), ds)
 		}
 	}
 	// dirInfo, err = f.Readdir(0)
@@ -223,7 +225,8 @@ func fillDirSpec(name string, dirSpec dirSpec) error {
 	return nil
 }
 
-func findChanges(dsa, dsb dirSpec) dirSpec {
+// Find new or changed files, excluding ones, that were removed
+func findDirSpecChanges(dsa, dsb dirSpec) dirSpec {
 	return nil
 }
 
