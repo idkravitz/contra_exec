@@ -28,7 +28,6 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 USER tram
 
 ADD tram-exec src/tram-exec/
-RUN ls -la src/tram-exec
 ADD tram-commons src/tram-commons/
 
 RUN go install tram-exec
