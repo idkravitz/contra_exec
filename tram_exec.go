@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"time"
 
@@ -21,8 +20,8 @@ import (
 
 const execPath = "/home/tram/exec_dir"
 
-var srcDir = path.Join(execPath, "src")
-var runDir = path.Join(execPath, "run")
+var srcDir = filepath.Join(execPath, "src")
+var runDir = filepath.Join(execPath, "run")
 
 type tramExecApp struct {
 	clientID      string
@@ -31,12 +30,12 @@ type tramExecApp struct {
 	q             *amqp.Connection
 }
 
-type dirSpecUnit struct {
-	ModTime time.Time
-	IsDir   bool
+type fileTreeState struct {
+	IsDir    bool
+	NodeName string
+	ModTime  time.Time
+	Children map[string]*fileTreeState
 }
-
-type dirSpec map[string]dirSpecUnit
 
 func prepareExecDir() {
 	os.RemoveAll(execPath)
@@ -57,7 +56,7 @@ func (app *tramExecApp) retrieveFile(id string, collection string, dir string, e
 	fd := &model.FileDescription{}
 
 	file.GetMeta(fd)
-	filename := path.Join(dir, fd.Filename)
+	filename := filepath.Join(dir, fd.Filename)
 	out, err := os.Create(filename)
 	if err != nil {
 		log.Fatal(err)
@@ -88,7 +87,7 @@ func guessUnpackCommand(workdir, fullFilename string) *exec.Cmd {
 }
 
 func unpackData(workdir, srcDir, filename string) {
-	fullFilename := path.Join(srcDir, filename)
+	fullFilename := filepath.Join(srcDir, filename)
 	cmd := guessUnpackCommand(workdir, fullFilename)
 
 	out, err := cmd.CombinedOutput()
@@ -109,7 +108,7 @@ func diveIntoData(workdir string) string {
 	}
 	finalPath := workdir
 	if len(fis) == 1 && fis[0].IsDir() {
-		finalPath = diveIntoData(path.Join(finalPath, fis[0].Name()))
+		finalPath = diveIntoData(filepath.Join(finalPath, fis[0].Name()))
 	}
 	return finalPath
 }
@@ -136,7 +135,7 @@ func simpleCopy(oldpath, newpath string) error {
 }
 
 func runControlScript(workdir, filename string) ([]byte, error) {
-	cmd := exec.Command("/bin/bash", path.Join(workdir, filename))
+	cmd := exec.Command("/bin/bash", filepath.Join(workdir, filename))
 	cmd.Dir = workdir
 
 	out, err := cmd.CombinedOutput()
@@ -186,65 +185,105 @@ func (app *tramExecApp) Stop() {
 
 func placeControlScript(workdir, srcDir, filename string) {
 	workdir = diveIntoData(workdir)
-	err := simpleCopy(path.Join(srcDir, filename), path.Join(workdir, filename))
+	err := simpleCopy(filepath.Join(srcDir, filename), filepath.Join(workdir, filename))
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func fillDirSpec(name string, ds dirSpec) error {
-
-	f, err := os.Open(name)
+func getFileTreeState(pth string) (fts *fileTreeState, err error) {
+	f, err := os.Open(pth)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	ds[name] = dirSpecUnit{
-		ModTime: fi.ModTime(),
-		IsDir:   fi.IsDir(),
+	fts = &fileTreeState{
+		IsDir:    fi.IsDir(),
+		ModTime:  fi.ModTime(),
+		NodeName: filepath.Base(pth),
+		Children: nil,
 	}
+
 	if fi.IsDir() {
-		dirname := name
 		names, err := f.Readdirnames(0)
-
+		f.Close()
 		if err != nil {
-			return err
+			return nil, err
+		}
+		if names != nil && len(names) > 0 {
+			fts.Children = map[string]*fileTreeState{}
 		}
 		for _, name := range names {
-			fillDirSpec(path.Join(dirname, name), ds)
+			childPath := filepath.Join(pth, name)
+			childFts, err := getFileTreeState(childPath)
+			if err != nil {
+				return nil, err
+			}
+			fts.Children[name] = childFts
 		}
 	}
-	// dirInfo, err = f.Readdir(0)
-	// if err != nil {
-	// log.Fatal(err)
-	// }
-	return nil
+	f.Close()
+	return fts, nil
 }
 
-// Find new or changed files, excluding ones, that were removed
-func findDirSpecChanges(dsa, dsb dirSpec) dirSpec {
-	return nil
+func findFileTreeStateChanges(dsa, dsb *fileTreeState) (diff *fileTreeState) {
+	diff = nil
+
+	if dsa.IsDir != dsb.IsDir {
+		diff = dsb
+	} else if dsb.IsDir {
+		if dsb.Children != nil {
+			diff = &fileTreeState{
+				IsDir:    true,
+				NodeName: dsb.NodeName,
+				ModTime:  dsb.ModTime,
+				Children: map[string]*fileTreeState{},
+			}
+			anyChildrenAdded := false
+			for name, dsbChild := range dsb.Children {
+				dsaChild, present := dsa.Children[name]
+				if present {
+					diffChild := findFileTreeStateChanges(dsaChild, dsbChild)
+					if diffChild != nil {
+						diff.Children[name] = diffChild
+						anyChildrenAdded = true
+					}
+				} else {
+					diff.Children[name] = dsbChild
+					anyChildrenAdded = true
+				}
+			}
+			if !anyChildrenAdded {
+				diff = nil
+			}
+		}
+	} else if dsa.ModTime != dsb.ModTime {
+		diff = dsb
+	}
+
+	return diff
 }
 
 func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, error) {
 	prepareExecDir()
 	dataFd := app.retrieveFile(dataFid, "data", srcDir, false)
 	controlFd := app.retrieveFile(controlFid, "control", srcDir, true)
-	convertToUnixLE(path.Join(srcDir, controlFd.Filename))
+	convertToUnixLE(filepath.Join(srcDir, controlFd.Filename))
 	unpackData(runDir, srcDir, dataFd.Filename)
 	placeControlScript(runDir, srcDir, controlFd.Filename)
 
-	dirSpecBefore := dirSpec{}
-	fillDirSpec(runDir, dirSpecBefore)
+	// dirSpecBefore := dirSpec{}
+	ftsBefore, _ := getFileTreeState(runDir)
 	s, e := runControlScript(runDir, controlFd.Filename)
-	dirSpecAfter := dirSpec{}
-	fillDirSpec(runDir, dirSpecAfter)
+	ftsAfter, _ := getFileTreeState(runDir)
+	// fillDirSpec(runDir, dirSpecAfter)
 
-	//diff := findChanges(dirSpecBefore, dirSpecAfter)
+	findFileTreeStateChanges(ftsBefore, ftsAfter)
 
 	return s, e
 }
