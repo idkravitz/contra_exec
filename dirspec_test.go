@@ -151,3 +151,37 @@ func TestFindChangesAdvanced(t *testing.T) {
 	}
 	os.RemoveAll(targetDirname)
 }
+
+func TestPackTree(t *testing.T) {
+	targetDirname := simpleSetup(t)
+
+	os.Mkdir(filepath.Join(targetDirname, "Dir_A"), 0700)
+	filePutString(filepath.Join(targetDirname, "Dir_A"), "file", "sample") // this file won't change
+	os.Mkdir(filepath.Join(targetDirname, "Dir_A", "Dir_B"), 0700)         // this would be empty
+	os.Mkdir(filepath.Join(targetDirname, "Dir_A", "Dir_C"), 0700)         // this would have one changed file, one new and one unchanged
+	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_A", "sample")
+	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_B", "sample")
+
+	ftsBefore, err := getFileTreeState(targetDirname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_B", "changed")
+	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_C", "new")
+	os.Mkdir(filepath.Join(targetDirname, "Dir_A", "Dir_D"), 0700) // new empty string
+	ftsAfter, err := getFileTreeState(targetDirname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ftsDiff := findFileTreeStateChanges(ftsBefore, ftsAfter)
+
+	outDir, err := ioutil.TempDir("", "output_filetreespec_")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = packTree(filepath.Dir(targetDirname), outDir, "output.tar.gz", ftsDiff)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

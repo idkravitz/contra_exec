@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -79,6 +80,23 @@ func guessUnpackCommand(workdir, fullFilename string) *exec.Cmd {
 		cmd = exec.Command("tar", "-xzf", fullFilename)
 	case ".7z", ".7zip":
 		cmd = exec.Command("7za", "x", fullFilename)
+	}
+	if cmd != nil {
+		cmd.Dir = workdir
+	}
+	return cmd
+}
+
+func guessPackCommand(workdir, filename, dirToPack string) *exec.Cmd {
+	ext := filepath.Ext(filename)
+	var cmd *exec.Cmd
+	switch ext {
+	case ".tar":
+		cmd = exec.Command("tar", "-cf", filename, dirToPack)
+	case ".gz", ".gzip":
+		cmd = exec.Command("tar", "-czf", filename, dirToPack)
+		// case ".7z", ".7zip":
+		// cmd = exec.Command("7za", "x", fullFilename)
 	}
 	if cmd != nil {
 		cmd.Dir = workdir
@@ -267,6 +285,48 @@ func findFileTreeStateChanges(dsa, dsb *fileTreeState) (diff *fileTreeState) {
 	}
 
 	return diff
+}
+
+func treeCopy(from, to string, tree *fileTreeState) error {
+	curToPath := filepath.Join(to, tree.NodeName)
+	curFromPath := filepath.Join(from, tree.NodeName)
+	if tree.IsDir {
+		if err := os.Mkdir(curToPath, 0755); err != nil {
+			return err
+		}
+		for _, childTree := range tree.Children {
+			if err := treeCopy(curFromPath, curToPath, childTree); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := simpleCopy(curFromPath, curToPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func packTree(baseDir string, outDir string, filename string, tree *fileTreeState) error {
+	// outBaseDir := filepath.Base(baseDir)
+	os.RemoveAll(outDir)
+	os.MkdirAll(outDir, 0755)
+	dirToPack := tree.NodeName
+	if err := treeCopy(baseDir, outDir, tree); err != nil {
+		return err
+	}
+	packCmd := guessPackCommand(outDir, filename, dirToPack)
+	if packCmd == nil {
+		log.Fatal("Pack command creation failed")
+	}
+
+	if output, err := packCmd.CombinedOutput(); err != nil {
+		return errors.New(string(output))
+	}
+
+	// packSrcDir := filepath.Join(outDir, outBaseDir)
+	// os.Mkdir(packSrcDir, 0755)
+	return nil
 }
 
 func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, error) {
