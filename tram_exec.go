@@ -23,6 +23,7 @@ const execPath = "/home/tram/exec_dir"
 
 var srcDir = filepath.Join(execPath, "src")
 var runDir = filepath.Join(execPath, "run")
+var outDir = filepath.Join(execPath, "out")
 
 type tramExecApp struct {
 	clientID      string
@@ -43,6 +44,7 @@ func prepareExecDir() {
 	os.Mkdir(execPath, 0700)
 	os.Mkdir(srcDir, 0700)
 	os.Mkdir(runDir, 0700)
+	os.Mkdir(outDir, 0700)
 }
 
 func (app *tramExecApp) retrieveFile(id string, collection string, dir string, executable bool) *model.FileDescription {
@@ -329,7 +331,7 @@ func packTree(baseDir string, outDir string, filename string, tree *fileTreeStat
 	return nil
 }
 
-func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, error) {
+func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, string, error) {
 	prepareExecDir()
 	dataFd := app.retrieveFile(dataFid, "data", srcDir, false)
 	controlFd := app.retrieveFile(controlFid, "control", srcDir, true)
@@ -337,15 +339,20 @@ func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, error) {
 	unpackData(runDir, srcDir, dataFd.Filename)
 	placeControlScript(runDir, srcDir, controlFd.Filename)
 
-	// dirSpecBefore := dirSpec{}
 	ftsBefore, _ := getFileTreeState(runDir)
 	s, e := runControlScript(runDir, controlFd.Filename)
 	ftsAfter, _ := getFileTreeState(runDir)
-	// fillDirSpec(runDir, dirSpecAfter)
 
-	findFileTreeStateChanges(ftsBefore, ftsAfter)
+	diff := findFileTreeStateChanges(ftsBefore, ftsAfter)
 
-	return s, e
+	var outputName string
+	if diff != nil {
+		arName := "output.tar.gz"
+		packTree(filepath.Dir(runDir), outDir, arName, diff)
+		outputName = filepath.Join(outDir, arName)
+	}
+
+	return s, outputName, e
 }
 
 func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
@@ -353,10 +360,11 @@ func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
 	if err := bson.Unmarshal(delivery.Body, &msg); err != nil {
 		log.Fatal(err)
 	}
-	output, err := app.execute(msg.DataFid, msg.ControlFid)
+	output, outputFilename, err := app.execute(msg.DataFid, msg.ControlFid)
 	s := app.s.Copy()
 	defer s.Close()
 
+	// TODO: store in GRID outputFile archive
 	if err := s.DB("tram").C("tasks").UpdateId(msg.TaskId, &bson.M{"$set": &bson.M{"output": string(output), "status": model.TASK_STATUS_DONE}}); err != nil {
 		log.Fatal(err)
 	}
