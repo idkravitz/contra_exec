@@ -25,6 +25,8 @@ RUN go get gopkg.in/mgo.v2 && go get github.com/streadway/amqp
 
 ADD . src/github.com/kravitz/tram_exec
 
+RUN go test github.com/kravitz/tram_exec
+
 RUN go install github.com/kravitz/tram_exec
 EXPOSE 8080
 

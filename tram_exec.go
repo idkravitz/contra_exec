@@ -36,6 +36,7 @@ type fileTreeState struct {
 	IsDir    bool
 	NodeName string
 	ModTime  time.Time
+	Size     int64
 	Children map[string]*fileTreeState
 }
 
@@ -225,6 +226,7 @@ func getFileTreeState(pth string) (fts *fileTreeState, err error) {
 	fts = &fileTreeState{
 		IsDir:    fi.IsDir(),
 		ModTime:  fi.ModTime(),
+		Size:     fi.Size(),
 		NodeName: filepath.Base(pth),
 		Children: nil,
 	}
@@ -282,7 +284,7 @@ func findFileTreeStateChanges(dsa, dsb *fileTreeState) (diff *fileTreeState) {
 				diff = nil
 			}
 		}
-	} else if dsa.ModTime != dsb.ModTime {
+	} else if dsa.ModTime != dsb.ModTime || dsa.Size != dsb.Size {
 		diff = dsb
 	}
 
@@ -361,6 +363,7 @@ func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
 		log.Fatal(err)
 	}
 	output, outputFilename, err := app.execute(msg.DataFid, msg.ControlFid)
+	log.Print("STUB", outputFilename)
 	s := app.s.Copy()
 	defer s.Close()
 

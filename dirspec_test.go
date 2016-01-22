@@ -9,6 +9,9 @@ import (
 	"github.com/kravitz/tram_exec/tram-commons/util"
 )
 
+// FTS structure description shortname
+type FTSS map[string]interface{}
+
 func filePutString(directory, filename, content string) error {
 	fullPath := filepath.Join(directory, filename)
 	fh, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE, 0666)
@@ -43,12 +46,39 @@ func simpleSetup(t *testing.T) (targetDirname string) {
 	return targetDirname
 }
 
+func fileTreeStateHasStrucureLike(fts *fileTreeState, ftss FTSS) bool {
+	estLen := 0
+	for name, nest := range ftss {
+		if ftsChild, ok := fts.Children[name]; ok {
+			if nest != nil {
+				if !fileTreeStateHasStrucureLike(ftsChild, nest.(FTSS)) {
+					return false
+				}
+			}
+		} else {
+			return false
+		}
+		estLen = estLen + 1
+	}
+	if len(fts.Children) != estLen {
+		return false
+	}
+	return true
+}
+
 func TestFindChangesSimple(t *testing.T) {
 	targetDirname := simpleSetup(t)
 
 	ftsBefore, err := getFileTreeState(targetDirname)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !fileTreeStateHasStrucureLike(ftsBefore, FTSS{
+		"file_A.txt": nil,
+		"file_B.txt": nil,
+		"file_C.txt": nil,
+	}) {
+		t.Fatal("Simple test setup fails structure test")
 	}
 
 	// Add one new file
@@ -74,9 +104,10 @@ func TestFindChangesSimple(t *testing.T) {
 		t.Fatal("No changes found!")
 	}
 
-	if !(len(ftsDiff.Children) == 2 &&
-		hasKey(ftsDiff.Children, "file_New.txt") &&
-		hasKey(ftsDiff.Children, "file_A.txt")) {
+	if !fileTreeStateHasStrucureLike(ftsDiff, FTSS{
+		"file_New.txt": nil,
+		"file_A.txt":   nil,
+	}) {
 		t.Fatal("Expected two files diff in:", util.Qjson(ftsDiff))
 	}
 
@@ -129,30 +160,29 @@ func TestFindChangesAdvanced(t *testing.T) {
 	}
 	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_B", "changed")
 	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_C", "new")
-	os.Mkdir(filepath.Join(targetDirname, "Dir_A", "Dir_D"), 0700) // new empty string
+	os.Mkdir(filepath.Join(targetDirname, "Dir_A", "Dir_D"), 0700) // new empty dir
 	ftsAfter, err := getFileTreeState(targetDirname)
 	if err != nil {
 		t.Fatal(err)
 	}
+	ftss := FTSS{
+		"Dir_A": FTSS{
+			"Dir_D": nil,
+			"Dir_C": FTSS{
+				"file_B": nil,
+				"file_C": nil,
+			},
+		},
+	}
 	ftsDiff := findFileTreeStateChanges(ftsBefore, ftsAfter)
-	if !(ftsDiff != nil &&
-		ftsDiff.Children != nil &&
-		len(ftsDiff.Children) == 1 &&
-		hasKey(ftsDiff.Children, "Dir_A") &&
-		ftsDiff.Children["Dir_A"].Children != nil &&
-		len(ftsDiff.Children["Dir_A"].Children) == 2 &&
-		hasKey(ftsDiff.Children["Dir_A"].Children, "Dir_D") &&
-		hasKey(ftsDiff.Children["Dir_A"].Children, "Dir_C") &&
-		ftsDiff.Children["Dir_A"].Children["Dir_C"].Children != nil &&
-		len(ftsDiff.Children["Dir_A"].Children["Dir_C"].Children) == 2 &&
-		hasKey(ftsDiff.Children["Dir_A"].Children["Dir_C"].Children, "file_B") &&
-		hasKey(ftsDiff.Children["Dir_A"].Children["Dir_C"].Children, "file_C")) {
+	if !(ftsDiff != nil && fileTreeStateHasStrucureLike(ftsDiff, ftss)) {
 		t.Fatal("Advanced test failed with diff:", util.Qjson(ftsDiff))
 	}
 	os.RemoveAll(targetDirname)
 }
 
 func TestPackTree(t *testing.T) {
+	// This test fails on windows, may need to avoid tar or smth like that
 	targetDirname := simpleSetup(t)
 
 	os.Mkdir(filepath.Join(targetDirname, "Dir_A"), 0700)
@@ -168,12 +198,25 @@ func TestPackTree(t *testing.T) {
 	}
 	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_B", "changed")
 	filePutString(filepath.Join(targetDirname, "Dir_A", "Dir_C"), "file_C", "new")
-	os.Mkdir(filepath.Join(targetDirname, "Dir_A", "Dir_D"), 0700) // new empty string
+	os.Mkdir(filepath.Join(targetDirname, "Dir_A", "Dir_D"), 0700) // new empty dir
 	ftsAfter, err := getFileTreeState(targetDirname)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ftsDiff := findFileTreeStateChanges(ftsBefore, ftsAfter)
+	// expected structure
+	ftss := FTSS{
+		"Dir_A": FTSS{
+			"Dir_D": nil,
+			"Dir_C": FTSS{
+				"file_B": nil,
+				"file_C": nil,
+			},
+		},
+	}
+	if !fileTreeStateHasStrucureLike(ftsDiff, ftss) {
+		t.Fatal("Diff has wrong structure")
+	}
 
 	outDir, err := ioutil.TempDir("", "output_filetreespec_")
 	if err != nil {
@@ -184,4 +227,28 @@ func TestPackTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	midDir, err := ioutil.TempDir("", "unpack_filetreespec_")
+	unpackData(midDir, outDir, "output.tar.gz")
+
+	dh, err := os.Open(midDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subDirs, err := dh.Readdirnames(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testDir := filepath.Join(midDir, subDirs[0])
+	unpackState, err := getFileTreeState(testDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !fileTreeStateHasStrucureLike(unpackState, ftss) {
+		t.Fatal("Should be the same after unpack")
+	}
+
+	os.RemoveAll(targetDirname)
+	os.RemoveAll(outDir)
 }
