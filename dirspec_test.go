@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kravitz/tram_api/tram-commons/util"
+	"github.com/kravitz/tram_exec/tram-commons/util"
 )
 
 func filePutString(directory, filename, content string) error {
