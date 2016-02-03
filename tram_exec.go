@@ -357,18 +357,36 @@ func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, string, err
 	return s, outputName, e
 }
 
+func uploadOutput(s *mgo.Session, filename string) interface{} {
+	gfs := db.GetGridFS(s, "output")
+	outH, _ := gfs.Create("")
+	defer outH.Close()
+
+	inH, _ := os.Open(filename)
+	defer inH.Close()
+
+	io.Copy(outH, inH)
+
+	return outH.Id()
+}
+
 func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
 	msg := model.TaskMsg{}
 	if err := bson.Unmarshal(delivery.Body, &msg); err != nil {
 		log.Fatal(err)
 	}
 	output, outputFilename, err := app.execute(msg.DataFid, msg.ControlFid)
-	log.Print("STUB", outputFilename)
+	// log.Print("STUB", outputFilename)
 	s := app.s.Copy()
 	defer s.Close()
 
+	var outID interface{}
+	if len(outputFilename) > 0 {
+		outID = uploadOutput(s, outputFilename)
+	}
+
 	// TODO: store in GRID outputFile archive
-	if err := s.DB("tram").C("tasks").UpdateId(msg.TaskId, &bson.M{"$set": &bson.M{"output": string(output), "status": model.TASK_STATUS_DONE}}); err != nil {
+	if err := db.GetCol(s, "tasks").UpdateId(msg.TaskId, &bson.M{"$set": &bson.M{"output": string(output), "status": model.TASK_STATUS_DONE, "output_fid": outID}}); err != nil {
 		log.Fatal(err)
 	}
 
