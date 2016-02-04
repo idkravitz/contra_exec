@@ -3,6 +3,7 @@ FROM golang:latest
 MAINTAINER Dmitry Kravtsov <idkravitz@gmail.com>
 
 RUN apt-get update && apt-get -y install dos2unix unzip p7zip-full git build-essential cmake
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # http proxy support
 RUN [ -n "$http_proxy" ] && apt-get update && apt-get install -y corkscrew && \
@@ -13,24 +14,20 @@ RUN cd /usr/local && mkdir transims4 transims4/bin && cd transims4 && \
 	cd build && cmake ../src && make -j2 && cp bin/* ../bin && cd .. && \
 	rm -rf src build
 
-
 RUN useradd -r -m tram
 USER tram
 WORKDIR /home/tram
 
-RUN mkdir bin src pkg www 
+RUN mkdir -p bin src/github.com/kravitz/tram_exec pkg
 ENV GOPATH /home/tram
 ENV PATH /usr/local/transims4/bin:$PATH
 RUN go get gopkg.in/mgo.v2 && go get github.com/streadway/amqp
 
-USER root
-RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-USER tram
+ADD . src/github.com/kravitz/tram_exec
 
-ADD tram-exec src/tram-exec/
-ADD tram-commons src/tram-commons/
+RUN go test github.com/kravitz/tram_exec
 
-RUN go install tram-exec
+RUN go install github.com/kravitz/tram_exec
 EXPOSE 8080
 
-ENTRYPOINT ["./bin/tram-exec"]
+ENTRYPOINT ["./bin/tram_exec"]
