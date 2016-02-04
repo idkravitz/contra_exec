@@ -364,6 +364,8 @@ func uploadOutput(s *mgo.Session, filename string) interface{} {
 	outH, _ := gfs.Create("")
 	defer outH.Close()
 
+	outH.SetMeta(bson.M{"filename": filepath.Base(filename)})
+
 	inH, _ := os.Open(filename)
 	defer inH.Close()
 
