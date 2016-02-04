@@ -204,12 +204,14 @@ func (app *tramExecApp) Stop() {
 	app.q.Close()
 }
 
-func placeControlScript(workdir, srcDir, filename string) {
+func placeControlScript(workdir, srcDir, filename string) string {
 	workdir = diveIntoData(workdir)
 	err := simpleCopy(filepath.Join(srcDir, filename), filepath.Join(workdir, filename))
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	return workdir
 }
 
 func getFileTreeState(pth string) (fts *fileTreeState, err error) {
@@ -339,10 +341,10 @@ func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, string, err
 	controlFd := app.retrieveFile(controlFid, "control", srcDir, true)
 	convertToUnixLE(filepath.Join(srcDir, controlFd.Filename))
 	unpackData(runDir, srcDir, dataFd.Filename)
-	placeControlScript(runDir, srcDir, controlFd.Filename)
+	execDir := placeControlScript(runDir, srcDir, controlFd.Filename)
 
 	ftsBefore, _ := getFileTreeState(runDir)
-	s, e := runControlScript(runDir, controlFd.Filename)
+	s, e := runControlScript(execDir, controlFd.Filename)
 	ftsAfter, _ := getFileTreeState(runDir)
 
 	diff := findFileTreeStateChanges(ftsBefore, ftsAfter)
@@ -386,7 +388,12 @@ func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
 	}
 
 	// TODO: store in GRID outputFile archive
-	if err := db.GetCol(s, "tasks").UpdateId(msg.TaskId, &bson.M{"$set": &bson.M{"output": string(output), "status": model.TASK_STATUS_DONE, "output_fid": outID}}); err != nil {
+	var serOutID string
+	if outID != nil {
+		ooutID, _ := outID.(bson.ObjectId)
+		serOutID = ooutID.Hex()
+	}
+	if err := db.GetCol(s, "tasks").UpdateId(msg.TaskId, &bson.M{"$set": &bson.M{"output": string(output), "status": model.TASK_STATUS_DONE, "output_fid": serOutID}}); err != nil {
 		log.Fatal(err)
 	}
 
