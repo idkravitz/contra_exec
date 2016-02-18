@@ -10,22 +10,22 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kravitz/tram_exec/tram-commons/db"
-	"github.com/kravitz/tram_exec/tram-commons/model"
-	"github.com/kravitz/tram_exec/tram-commons/util"
+	"github.com/kravitz/contra_lib/db"
+	"github.com/kravitz/contra_lib/model"
+	"github.com/kravitz/contra_lib/util"
 
 	"github.com/streadway/amqp"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
 
-const execPath = "/home/tram/exec_dir"
+const execPath = "/home/contra/exec_dir"
 
 var srcDir = filepath.Join(execPath, "src")
 var runDir = filepath.Join(execPath, "run")
 var outDir = filepath.Join(execPath, "out")
 
-type tramExecApp struct {
+type contraExecApp struct {
 	clientID      string
 	consoleLaunch bool
 	s             *mgo.Session
@@ -48,7 +48,7 @@ func prepareExecDir() {
 	os.Mkdir(outDir, 0700)
 }
 
-func (app *tramExecApp) retrieveFile(id string, collection string, dir string, executable bool) *model.FileDescription {
+func (app *contraExecApp) retrieveFile(id string, collection string, dir string, executable bool) *model.FileDescription {
 	s := app.s.Copy()
 	defer s.Close()
 
@@ -173,7 +173,7 @@ func convertToUnixLE(fullFilename string) {
 }
 
 // TODO: share mogno and amqp init section to get rid of init order importance
-func createApp() *tramExecApp {
+func createApp() *contraExecApp {
 	mongoSocket := "tram-mongo:27017"
 	log.Println("Connect to mongo at:", mongoSocket)
 	s, err := db.MongoInitConnect(mongoSocket)
@@ -190,7 +190,7 @@ func createApp() *tramExecApp {
 		log.Fatal(err)
 	}
 
-	app := &tramExecApp{
+	app := &contraExecApp{
 		s:             s,
 		q:             q,
 		clientID:      os.Getenv("clientID"),
@@ -199,7 +199,7 @@ func createApp() *tramExecApp {
 	return app
 }
 
-func (app *tramExecApp) Stop() {
+func (app *contraExecApp) Stop() {
 	app.s.Close()
 	app.q.Close()
 }
@@ -335,7 +335,7 @@ func packTree(baseDir string, outDir string, filename string, tree *fileTreeStat
 	return nil
 }
 
-func (app *tramExecApp) execute(dataFid, controlFid string) ([]byte, string, error) {
+func (app *contraExecApp) execute(dataFid, controlFid string) ([]byte, string, error) {
 	prepareExecDir()
 	dataFd := app.retrieveFile(dataFid, "data", srcDir, false)
 	controlFd := app.retrieveFile(controlFid, "control", srcDir, true)
@@ -374,7 +374,7 @@ func uploadOutput(s *mgo.Session, filename string) interface{} {
 	return outH.Id()
 }
 
-func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
+func (app *contraExecApp) processDelivery(delivery amqp.Delivery) {
 	msg := model.TaskMsg{}
 	if err := bson.Unmarshal(delivery.Body, &msg); err != nil {
 		log.Fatal(err)
@@ -408,7 +408,7 @@ func (app *tramExecApp) processDelivery(delivery amqp.Delivery) {
 	}
 }
 
-func (app *tramExecApp) MainLoop() {
+func (app *contraExecApp) MainLoop() {
 	channel, err := app.q.Channel()
 	if err != nil { // Add durability with redial action
 		log.Fatal(err)

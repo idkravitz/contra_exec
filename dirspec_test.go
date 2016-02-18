@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kravitz/tram_exec/tram-commons/util"
+	"github.com/kravitz/contra_lib/util"
 )
 
 // FTS structure description shortname
