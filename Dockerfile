@@ -16,6 +16,7 @@ USER contra
 WORKDIR /home/contra
 ENV GOPATH /home/contra
 ENV PATH /usr/local/transims4/bin:$PATH
+ENV GO15VENDOREXPERIMENT=1
 
 RUN mkdir -p bin src/github.com/kravitz/contra_exec pkg \
     && go get github.com/Masterminds/glide
